@@ -3,6 +3,7 @@ package audit
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,13 @@ type fakeCodex struct{}
 
 func (fakeCodex) Call(_ context.Context, _, task string, payload any, into any) (json.RawMessage, error) {
 	data, _ := json.Marshal(payload)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return nil, err
+	}
+	if string(fields["context_blocks"]) != "[]" {
+		return nil, errors.New("context_blocks must be an empty array when no context is configured")
+	}
 	var input struct {
 		Blocks []model.Block `json:"blocks"`
 		Design []model.Block `json:"design_blocks"`

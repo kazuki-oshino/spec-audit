@@ -62,7 +62,7 @@ func runID() string {
 }
 
 func blocksFor(documents []model.Document, role string) []model.Block {
-	var blocks []model.Block
+	blocks := make([]model.Block, 0)
 	for _, doc := range documents {
 		if doc.Role == role {
 			blocks = append(blocks, doc.Blocks...)
