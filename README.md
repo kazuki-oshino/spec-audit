@@ -25,7 +25,7 @@ just run examples/sample/audit.yaml
 just replay examples/sample/.specaudit/runs/<run-id>
 ```
 
-`just run`はbridgeとCLIをビルドしてから監査します。結果の`report.md`のパスを標準出力に表示します。終了コードは0が処理完了、1が設定・入力エラー、2がpartial report、130が中断です。指摘の有無だけでは終了コードは変わりません。
+`just run`はリポジトリ直下の`.env`を読み込み、ビルド済みのbridgeとCLIで監査します。ソースを変更した場合は`just build`を再実行してください。結果の`report.md`のパスを標準出力に表示します。終了コードは0が処理完了、1が設定・入力エラー、2がpartial report、130が中断です。指摘の有無だけでは終了コードは変わりません。
 
 設定ファイルの相対パスは設定ファイルのあるディレクトリから解決します。`baseline`と`design`にはローカルMarkdownのファイルまたはglobを指定します。`context`は用語などの参考資料です。Codexは`gpt-6-sol`・reasoning `medium`に固定しています。Jevモデルは例では`jev-latest`で、再現性が必要な場合は固定版を指定します。
 

@@ -1,3 +1,5 @@
+set dotenv-load := true
+
 default:
   just --list
 
@@ -24,8 +26,10 @@ test: test-go test-bridge
 build: build-bridge
   go build -o specaudit ./cmd/specaudit
 
-# 設定ファイルを指定して監査を実行
-run config="audit.yaml": build
+# ビルド済みCLIで設定ファイルを指定して監査を実行
+run config="audit.yaml":
+  @test -x ./specaudit || { echo "CLIがありません。先に just build を実行してください" >&2; exit 1; }
+  @test -f ./bridge/dist/src/main.js || { echo "bridgeがありません。先に just build を実行してください" >&2; exit 1; }
   ./specaudit run --config "{{config}}"
 
 # 保存済み結果からレポートを再生成
