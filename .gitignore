@@ -1,3 +1,6 @@
 .env
 .DS_Store
 .specaudit/
+node_modules/
+bridge/dist/
+/specaudit

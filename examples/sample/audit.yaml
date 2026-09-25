@@ -1,0 +1,14 @@
+version: 1
+baseline:
+  - ./prd.md
+design:
+  - ./design.md
+output_dir: ./.specaudit
+llm:
+  bridge_command: [node, ../../bridge/dist/src/main.js]
+  model: gpt-6-sol
+  effort: medium
+  concurrency: 1
+jev:
+  model: jev-latest
+  concurrency: 4

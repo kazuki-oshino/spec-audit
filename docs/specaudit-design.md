@@ -1,7 +1,7 @@
 # specaudit — PRD・設計資料の初回整合性監査CLI
 
 設計日: 2026-09-25
-状態: 実装前の簡易設計案。以下のコマンドや設定は、このアプリ用に新しく定義するもの。
+状態: 初版CLIを実装済み。本文は目標設計を記し、末尾の「現行実装と残る課題」で現行実装との差を明示する。
 
 ## 1. 目的と範囲
 
@@ -36,7 +36,7 @@ specaudit run --config audit.yaml
 specaudit replay --run .specaudit/runs/<run-id>
 ```
 
-`run`は新しい監査を実行する。`replay`は保存済みの応答から集約とレポート生成のみを実行し、モデルを再呼び出ししない。再評価のためのAPI呼び出しは新しい`run`として記録する。
+`run`は新しい監査を実行する。`replay`は保存済みの`result.json`からレポートを再生成し、モデルを再呼び出ししない。再評価のためのAPI呼び出しは新しい`run`として記録する。
 
 ```yaml
 version: 1
@@ -48,7 +48,9 @@ context:
   - ./docs/glossary.md
 output_dir: ./.specaudit
 llm:
-  bridge_command: [node, ./bridge/dist/main.js]
+  bridge_command: [node, ./bridge/dist/src/main.js]
+  model: gpt-6-sol
+  effort: medium
   concurrency: 1
 jev:
   model: jev-latest
@@ -59,7 +61,7 @@ jev:
 
 `baseline`は基準文書、`design`は監査対象、`context`は用語・背景であり要求を上書きする資料ではない。baselineが複数あり矛盾した場合、日時やファイル順で自動的に勝者を決めず、基準未確定として扱う。
 
-Codexの認証・利用モデルは利用環境に合わせて設定する。再現性を重視する運用ではモデル、SDK、プロンプト、ルールを固定する。`jev-latest`は動作確認用の例であり、固定バージョンではない。要求モデルと応答で解決されたモデルを記録する。
+Codexは`gpt-6-sol`のreasoning `medium`に固定する。[S9] 設定を省略してもこの値を適用し、別の値は設定読み込みとbridge入力検証で拒否する。Codexの認証は利用環境に合わせて設定する。再現性を重視する運用ではSDK、プロンプト、ルールも固定する。`jev-latest`は動作確認用の例であり、固定バージョンではない。要求したCodexモデルとreasoning effortを記録する。実効モデルの読み戻しは未実装。
 
 ## 4. パイプライン
 
@@ -169,7 +171,7 @@ finding kindは `contradiction / added_behavior / baseline_conflict / clarificat
 }
 ```
 
-taskは `extract_requirements / review_requirement / review_design_additions`。エラーは `ok: false` と `error: {code, message, retryable}`。入力・出力のJSON Schemaを共有し、TS・Go双方で検証する。
+taskは `extract_requirements / review_requirement / review_design_additions / review_baseline_conflicts`。エラーは `ok: false` と `error: {code, message, retryable}`。現行実装ではTypeScriptのZodと出力JSON Schema、Goのstructおよび根拠照合をそれぞれ保守している。単一のSchemaファイルから双方を生成する方式は未実装。
 
 Codex SDKではstartThread/runとturn単位のoutputSchemaを使える。[S1][S2] taskごとに新しいthreadを使い、過去の案件や要求の会話を暗黙に引き継がない。
 
@@ -183,9 +185,9 @@ runのAbortSignalを利用できる。[S4] GoのキャンセルはNodeだけで�
 
 Goのnet/httpを使う薄いアダプターを置く。既存Goクライアントにもtyped System One APIの実装例があるが、初版は依存を増やさなくてもよい。[S5]
 
-対象契約は `POST https://api.typesafe.ai/v1/systemone`、`state`、`questions`、対応するtyped answers。導入時のAPIバージョンで契約テストを作る。Jev公式ドキュメントは今回の取得でエラーとなったため、最新の詳細制限・認証・応答を実装開始時に公式資料または実APIで再確認する。[S5][S6]
+対象契約は `POST https://api.typesafe.ai/v1/systemone`、Bearer認証、`state`、`model`、`questions`、対応する`answers`、`usage`。公式API資料とNoulの説明を確認し、HTTP契約テストを追加した。[S7][S8] 実サービスへの疎通と品質評価は別途必要。
 
-noul/score等のraw値を保存し、業務上の判定・閾値はGo側のバージョン付きルールとする。confidenceや数値をそのまま「正答率」と表示しない。初期ルールは暫定であり、既知の事例で調整する。境界領域は再照合候補へ回す。
+noulのraw値を保存し、業務上の判定・閾値はGo側のバージョン付きルールとする。数値をそのまま「正答率」と表示しない。初期ルールは暫定であり、既知の事例で調整する。境界領域は再照合候補へ回す。
 
 バッチCLIなので、429/一時的5xx等はRetry-Afterを尊重した上限付きリトライを許す。401/403、スキーマ不正、入力上限超過は機械的な無限リトライをしない。サイズ超過は分割で処理する。失敗した判定はmissing responseとして残し、問題なしへ変換しない。
 
@@ -201,7 +203,7 @@ noul/score等のraw値を保存し、業務上の判定・閾値はGo側のバ�
   sources/
 ```
 
-主要成果物はreport.md。result.jsonは再集計・将来のUI向け。responses.jsonlに入力、応答、規則、時間、取得できる利用量、バージョン等を記録する。秘密鍵は保存しない。機密原文を含むため、runディレクトリやCodex側のセッション記録の保存方針・アクセス権・削除方針を定め、Git管理対象から外す。
+主要成果物はreport.md。result.jsonは再表示・将来のUI向け。現行のresponses.jsonlは各Codex判定結果と取得できたusage、およびJevのバッチusageを記録する。入力原文はsources/とmanifest.jsonに保存される。秘密鍵は保存しない。機密原文を含むため、runディレクトリやCodex側のセッション記録の保存方針・アクセス権・削除方針を定め、Git管理対象から外す。
 
 同一入力・規則からのローカルreplayと、APIを再実行した際のモデルの揺らぎは別物として扱う。
 
@@ -221,17 +223,16 @@ noul/score等のraw値を保存し、業務上の判定・閾値はGo側のバ�
 
 ```text
 cmd/specaudit/main.go
+internal/config/          # YAMLとglobの解決
 internal/model/           # 文書・要求・判定・レポート型
 internal/ingest/          # Markdown、スナップショット、source refs
-internal/audit/           # パイプライン、集約、バッチ計画
+internal/audit/           # パイプライン、集約、保存
 internal/codex/           # Go側bridgeクライアント
 internal/jev/             # HTTPアダプター
-internal/report/          # JSON保存、Markdownテンプレート
-bridge/src/main.ts
-bridge/src/tasks.ts
-contracts/                # bridge入出力JSON Schema
-prompts/                  # Codex prompts、Jev question definitions
-fixtures/                 # API不要の回帰テスト材料
+internal/report/          # Markdown生成
+bridge/src/main.ts        # Codex SDK起動とstdio
+bridge/src/protocol.ts    # Zod・出力Schema・プロンプト
+justfile                  # 開発と実行の入口
 ```
 
 Goは通常のstructとコンストラクターで組み立てる。LLMとJevの境界のみ小さなinterfaceにし、API不要でテスト可能にする。過剰なDI基盤や汎用ワークフローエンジンは導入しない。
@@ -247,6 +248,28 @@ Goは通常のstructとコンストラクターで組み立てる。LLMとJevの
 fixturesには、単純な矛盾、条件付きで両立する例、複数資料で満たす例、意図的なPoC省略、対応する要求がある中で追加された制約、基準文書同士の矛盾、画像や参照資料が欠けた例、API失敗を含める。
 
 初版から追うのは、指摘の有用性、見逃し、要求抽出の漏れ、人の確認時間、処理全体の時間・コスト。Jev単体の応答速度や「完了」の件数だけで評価しない。
+
+## 11. 現行実装と残る課題
+
+Go CLIは入力解決、スナップショット、ブロック分割、PRD抽出、Jevの全要求×全設計ブロック照合、要求別のCodex再照合、逆方向チェック、基準文書同士の矛盾候補、レポート保存、partial report、replayを実行する。bridgeはrillのGo→Node stdio境界、Zod入力検証、SDKの`startThread`、turnごとの`outputSchema`、`just`によるビルドとテストを参考にした。rillの長寿命NDJSONイベント処理、セッション再開、ツールイベント、複数provider、UI向けtelemetryは監査CLIに必要ないため導入していない。
+
+| rillの参照箇所 | specauditでの対応 |
+|---|---|
+| `internal/provider/nodebridge/launcher.go` | `internal/codex/client.go`。GoがNode子プロセス、stdin/stdout、終了と取消を管理する |
+| `bridge/codex-sdk/src/index.ts`、`protocol.ts` | `bridge/src/main.ts`、`protocol.ts`。SDK呼び出し、Zod入力検証、構造化出力を担当する |
+| `package.json`、`justfile` | 同名ファイル。`build-bridge`、`test-bridge`、`test`、`build`を入口にする |
+
+specauditのbridgeは1ジョブごとに起動し、1件のJSONを返す。対話UIのためのストリーミング契約を持つrillとは、この点を意図的に分けた。
+
+現行の制約は次のとおり。
+
+- Codexのジョブは直列で実行する。`llm.concurrency`は1だけを受け付ける。Jevは設定した並列数でバッチを処理する。
+- 基準文書は最大40KiB単位で抽出し、設計資料も最大40KiB単位で再照合する。大きすぎる単一ブロックや、逆方向チェック時に基準全文との組が120KiBを超える入力はpartial reportとする。分割境界をまたぐ要求は候補を再結合して再照合するが、候補集合が80KiBを超える場合は未判定を残す。
+- `replay`は保存済みの`result.json`からMarkdownを再描画する。生応答からの再検証・再集約、モデルを再呼び出す再評価は含まない。
+- Codex SDKのモデル、利用量、プロンプト版の完全な実効値を記録する機能、文書量と費用の事前見積り、実サービスでの監査精度評価は未完了。`jev-latest`は固定版ではない。
+- read-only sandboxとネットワーク無効化を指定するが、Codex CLIのユーザー設定やセッション保存まで隔離する仕組みはない。機密文書を扱う運用では専用のCodex環境と保存方針を用意する。
+
+この状態での検証はダミー文書によるGoの通しテスト、Jevの模擬HTTPサーバー、Codex bridgeのモックを使用した契約テスト、および空のダミー入力1件によるCodex SDK疎通まで。実文書を使ったモデル応答のE2Eや監査品質は未検証。
 
 ## 参考一次資料
 
@@ -267,5 +290,14 @@ https://github.com/chez-shanpu/typesafeai-go
 
 S6. kataras/jev（作者の公開Go実装。TypeSafe公式SDKではない）
 https://github.com/kataras/jev
+
+S7. TypeSafe公式HTTP API
+https://docs.typesafe.ai/api
+
+S8. TypeSafe公式Noul説明
+https://docs.typesafe.ai/primitives/noul
+
+S9. OpenAI公式GPT-6 Solモデル資料
+https://developers.openai.com/api/docs/models/gpt-6-sol
 
 補足: Jev適性の検討には、会話中で確認したmizchi/jev-playgroundのfit.md、when-to-use.md、tuning.mdを参照した。そこに記載された実測は作者の実験条件における結果であり、本アプリでの性能を保証しない。
